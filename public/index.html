@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="vi">
+
+<head>
+    <meta charset="utf-8" />
+    <title>Qwen2.5-VL Local • Webcam & Upload → LM Studio Proxy</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+        :root {
+            --bg: #0f1220;
+            --card: #171a2b;
+            --muted: #9aa3b2;
+            --text: #e8ecf1;
+            --accent: #6aa9ff;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            font-family: system-ui, Segoe UI, Roboto, Ubuntu, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+        }
+
+        .wrap {
+            max-width: 960px;
+            margin: 40px auto;
+            padding: 0 16px;
+        }
+
+        h1 {
+            font-size: 24px;
+            margin: 0 0 16px;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 16px
+        }
+
+        @media(min-width:900px) {
+            .grid {
+                grid-template-columns: 1fr 1fr
+            }
+        }
+
+        .card {
+            background: var(--card);
+            border-radius: 16px;
+            padding: 16px;
+            box-shadow: 0 8px 30px rgba(0, 0, 0, .25)
+        }
+
+        .card h2 {
+            margin: 0 0 12px;
+            font-size: 18px
+        }
+
+        button,
+        input[type=file] {
+            background: #1f2440;
+            color: var(--text);
+            border: 1px solid #2b335c;
+            border-radius: 10px;
+            padding: 10px 14px;
+            font-weight: 600;
+            cursor: pointer
+        }
+
+        button:hover {
+            background: #232a4f
+        }
+
+        .row {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            align-items: center
+        }
+
+        video,
+        canvas,
+        img {
+            max-width: 100%;
+            border-radius: 12px;
+            background: #000
+        }
+
+        .muted {
+            color: var(--muted);
+            font-size: 13px
+        }
+
+        pre {
+            background: #101426;
+            border: 1px solid #27305a;
+            border-radius: 12px;
+            padding: 12px;
+            overflow: auto;
+            max-height: 420px
+        }
+
+        .pill {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 999px;
+            background: #0f1a35;
+            border: 1px solid #27305a;
+            color: #b7c3d9;
+            font-size: 12px
+        }
+
+        .foot {
+            opacity: .75;
+            font-size: 12px;
+            margin-top: 24px
+        }
+
+        .overlay-grid {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        .overlay-grid .line.horizontal {
+            position: absolute;
+            background: lime;
+            height: 1px;
+            width: 100%;
+        }
+
+        .overlay-grid .line.vertical {
+            position: absolute;
+            background: lime;
+            width: 1px;
+            height: 100%;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="wrap">
+        <h1>Qwen2.5-VL • Local UI (Webcam & Upload → LM Studio)</h1>
+
+        <div class="grid">
+            <!-- Webcam -->
+            <div class="card">
+                <h2>📷 Webcam</h2>
+                <div class="row">
+                    <button id="btnStart">Start webcam</button>
+                    <button id="btnCapture" disabled>Capture & Analyze</button>
+                    <span class="pill" id="camState">idle</span>
+                </div>
+                <p class="muted">
+                    Trình duyệt sẽ xin quyền camera. Khi video hiển thị, đưa giấy tờ vào khung rồi bấm <b>Capture</b>.
+                    Ảnh chụp sẽ được giữ lại bên dưới.
+                </p>
+
+                <!-- Live preview -->
+                <div style="position: relative;">
+                    <video id="video" playsinline autoplay muted></video>
+                    <div class="overlay-grid">
+                        <div class="line horizontal" style="top: 10%;"></div>
+                        <div class="line horizontal" style="top: 90%;"></div>
+                        <div class="line vertical" style="left: 5%;"></div>
+                        <div class="line vertical" style="left: 95%;"></div>
+                    </div>
+                </div>
+
+                <!-- Captured preview -->
+                <img id="captured" alt="Ảnh đã chụp" style="display:block; margin-top:10px;" />
+
+                <canvas id="canvas" style="display:none;"></canvas>
+            </div>
+
+            <!-- Upload -->
+            <div class="card">
+                <h2>🖼️ Upload ảnh</h2>
+                <div class="row">
+                    <input type="file" id="fileInput" accept="image/*" />
+                    <button id="btnAnalyzeFile">Analyze</button>
+                </div>
+                <p class="muted">Chọn ảnh CCCD/Passport/ID. Ảnh sẽ được nén và gửi base64 tới server proxy → LM Studio.
+                </p>
+                <img id="preview" alt="" />
+            </div>
+        </div>
+
+        <!-- Output -->
+        <div class="card" style="margin-top:16px">
+            <h2>📤 Kết quả</h2>
+            <pre id="out">{}</pre>
+        </div>
+
+        <div class="foot muted">
+            Cần bật LM Studio Local Server tại <code>http://192.168.0.67:1234/v1</code> và đặt đúng
+            <code>MODEL_ID</code> trong <code>server.js</code>.
+        </div>
+    </div>
+
+    <script>
+        // Elements
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const preview = document.getElementById('preview');
+        const captured = document.getElementById('captured');
+        const out = document.getElementById('out');
+        const btnStart = document.getElementById('btnStart');
+        const btnCapture = document.getElementById('btnCapture');
+        const btnAnalyzeFile = document.getElementById('btnAnalyzeFile');
+        const fileInput = document.getElementById('fileInput');
+        const camState = document.getElementById('camState');
+
+        function setOut(obj) { out.textContent = (typeof obj === 'string') ? obj : JSON.stringify(obj, null, 2); }
+        function setCamState(s) { camState.textContent = s; }
+
+        // Nén ảnh về cạnh dài ~1280px để giảm độ trễ/VRAM
+        function imageToDataURL(imgEl, maxSide = 1280, quality = 0.92) {
+            const w = imgEl.naturalWidth || imgEl.videoWidth;
+            const h = imgEl.naturalHeight || imgEl.videoHeight;
+            if (!w || !h) return null;
+            let tw = w, th = h;
+            if (Math.max(w, h) > maxSide) {
+                if (w >= h) { tw = maxSide; th = Math.round(h * (maxSide / w)); }
+                else { th = maxSide; tw = Math.round(w * (maxSide / h)); }
+            }
+            const c = document.createElement('canvas');
+            c.width = tw; c.height = th;
+            const ctx = c.getContext('2d');
+            ctx.drawImage(imgEl, 0, 0, tw, th);
+            return c.toDataURL('image/jpeg', quality);
+        }
+
+        async function analyzeDataUrl(dataUrl) {
+            setOut('Đang gọi LM Studio…');
+            const r = await fetch('/api/analyze', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ imageDataUrl: dataUrl })
+            });
+            const data = await r.json();
+            // server.js trả { ok, result (JSON 5 trường), raw, lm_error }
+            setOut(data.result ?? data);
+        }
+
+        // Webcam flow
+        btnStart.onclick = async () => {
+            try {
+                setCamState('requesting…');
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'environment' }, audio: false
+                });
+                const track = stream.getVideoTracks()[0];
+                const capabilities = track.getCapabilities();
+
+                console.log('All capabilities:', capabilities);
+                console.log('focusMode supported:', capabilities.focusMode);
+
+                if (capabilities.focusMode && capabilities.focusMode.includes("continuous")) {
+                    await track.applyConstraints({ advanced: [{ focusMode: "continuous" }] });
+                    console.log("Focus mode set to continuous");
+                }
+                video.srcObject = stream;
+                await video.play();
+                btnCapture.disabled = false;
+                setCamState('ready');
+            } catch (e) {
+                setCamState('error');
+                setOut('Không mở được webcam: ' + e);
+            }
+        };
+
+        btnCapture.onclick = async () => {
+            try {
+                const durl = imageToDataURL(video, 1280, 0.92);
+                if (!durl) return setOut('Không thể chụp khung hình.');
+                // Hiển thị ảnh đã chụp
+                captured.src = durl;
+                captured.style.display = 'block';
+                // Gọi phân tích
+                await analyzeDataUrl(durl);
+            } catch (e) {
+                setOut('Lỗi: ' + e);
+            }
+        };
+
+        // Upload flow
+        fileInput.onchange = () => {
+            const f = fileInput.files?.[0];
+            if (!f) return;
+            const r = new FileReader();
+            r.onload = () => {
+                const img = new Image();
+                img.onload = () => {
+                    const durl = imageToDataURL(img, 1600, 0.92); // nén nhẹ cao hơn cho file tĩnh
+                    preview.src = durl;
+                };
+                img.src = r.result;
+            };
+            r.readAsDataURL(f);
+        };
+
+        btnAnalyzeFile.onclick = async () => {
+            try {
+                const durl = preview.src;
+                if (!durl) return setOut('Chưa có ảnh để phân tích.');
+                await analyzeDataUrl(durl);
+            } catch (e) {
+                setOut('Lỗi: ' + e);
+            }
+        };
+    </script>
+</body>
+
+</html>
