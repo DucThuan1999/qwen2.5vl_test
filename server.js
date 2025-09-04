@@ -61,7 +61,7 @@ function tryParseJson(text) {
   return { raw: text, error: "JSON parse failed" };
 }
 
-app.post("/api/analyze", async (req, res) => {
+app.post("/chat", async (req, res) => {
   const t_total0 = Date.now();
   try {
     const { imageDataUrl } = req.body;

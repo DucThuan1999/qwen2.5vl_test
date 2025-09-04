@@ -239,18 +239,31 @@
             return c.toDataURL('image/jpeg', quality);
         }
 
+        function dataUrlToBase64(durl) {
+            if (!durl || typeof durl !== 'string') return durl;
+            const idx = durl.indexOf(',');
+            return idx >= 0 ? durl.slice(idx + 1) : durl; // strip "data:image/...;base64," prefix if present
+        }
+
         async function analyzeDataUrl(dataUrl) {
             setOut('Đang gọi LM Studio…');
-            const r = await fetch('/api/analyze', {
+            console.log(dataUrlToBase64(dataUrl))
+            const r = await fetch('http://192.168.2.16:11434/api/chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ imageDataUrl: dataUrl })
+                body: JSON.stringify({
+                    model: "qwen2.5vl",
+                    messages: [
+                        { role: "user", content: "Bạn là trợ lý OCR/IE đọc giấy tờ (CCCD/Passport/ID/License).,Chỉ trích xuất thông tin và trả về JSON THUẦN (không markdown, không giải thích).,Output là object với 6 khóa: fullname, nationality, birth, doc_type, Id_number, address.,Quy tắc:,- fullname: họ tên đầy đủ.,- nationality: quốc tịch ngắn gọn (VD: 'Việt Nam' hoặc 'Vietnam').,- birth:,+ Nếu giấy tờ là của Việt Nam → giữ nguyên định dạng gốc dd/mm/yyyy.,+ Nếu giấy tờ là của người nước ngoài → giữ nguyên định dạng gốc trên giấy tờ, không tự ý đổi.,- address: cung cấp đầy đủ địa chỉ thường trú, có số nhà, không bịa.,- doc_type: ngắn gọn (VD: 'Vietnam National ID', 'Passport', 'Driver License').,- Id_number: số định danh/hộ chiếu.,Nếu thiếu thông tin, đặt null. TUYỆT ĐỐI không thêm chữ ngoài JSON." },
+                        { role: "user", images: [dataUrlToBase64(dataUrl)] }
+                    ],
+                    stream: false
+                })
             });
             const data = await r.json();
             // server.js trả { ok, result (JSON 5 trường), raw, lm_error }
             setOut(data.result ?? data);
         }
-
         // Webcam flow
         btnStart.onclick = async () => {
             try {
